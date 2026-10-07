@@ -250,4 +250,11 @@ export const INITIAL_CONFIG: PosConfig = {
   cashierName: 'Sexta / Operador 01',
   soundEnabled: true,
   autoPrint: true,
+  paperSize: '80mm',
+  printHeaderMessage: 'VÍVERES • CHARCUTERÍA • BEBIDAS',
+  printFooterMessage: '*** GRACIAS POR SU PREFERENCIA ***\nConserve su comprobante para cambios o devoluciones\n¡Feliz Día!',
+  printShowTax: true,
+  printShowExchangeRate: true,
+  printShowBarcode: true,
+  printCopies: 1,
 };

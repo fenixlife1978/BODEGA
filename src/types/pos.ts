@@ -56,6 +56,7 @@ export interface CartItem {
   product: Product;
   selectedPresentationId?: string;
   presentationName?: string;
+  selectedPresentationName?: string;
   unitOfMeasure?: string;
   quantity: number; // Decimal (e.g. 0.450) or integer
   quantityInputStr?: string; // String for free-form text input editing
@@ -93,6 +94,56 @@ export interface SaleRecord {
   changeGivenUsd: number;
   changeGivenBs: number;
   status: 'COMPLETADA' | 'ANULADA';
+  isCreditSale?: boolean;
+  customerId?: string;
+  customerName?: string;
+  customerTaxId?: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  taxId: string; // V-12345678, J-12345678-0
+  phone: string;
+  email?: string;
+  address?: string;
+  creditLimitUsd: number;
+  currentBalanceUsd: number; // outstanding balance
+  creditDays: number; // e.g. 15 or 30 days
+  createdAt: string;
+  notes?: string;
+}
+
+export interface CreditPaymentRecord {
+  id: string;
+  customerId: string;
+  timestamp: string;
+  amountUsd: number;
+  amountBs: number;
+  exchangeRate: number;
+  paymentMethod: 'EFECTIVO_USD' | 'EFECTIVO_BS' | 'PAGO_MOVIL' | 'PUNTO_VENTA' | 'TRANSFERENCIA';
+  reference: string;
+  notes?: string;
+  receivedBy: string;
+}
+
+export interface ReturnRecord {
+  id: string;
+  saleId: string;
+  receiptNumber: string;
+  timestamp: string;
+  items: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPriceUsd: number;
+    totalUsd: number;
+  }[];
+  totalRefundUsd: number;
+  totalRefundBs: number;
+  refundMethod: 'EFECTIVO_USD' | 'EFECTIVO_BS' | 'NOTA_CREDITO';
+  reason: string;
+  authorizedBy: string;
 }
 
 export interface KardexMovement {
@@ -121,4 +172,11 @@ export interface PosConfig {
   cashierName: string;
   soundEnabled: boolean;
   autoPrint: boolean;
+  paperSize: '80mm' | '58mm';
+  printHeaderMessage?: string;
+  printFooterMessage?: string;
+  printShowTax?: boolean;
+  printShowExchangeRate?: boolean;
+  printShowBarcode?: boolean;
+  printCopies?: number;
 }
