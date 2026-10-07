@@ -36,7 +36,7 @@ interface InventoryManagementModalProps {
 }
 
 export const InventoryManagementModal: React.FC<InventoryManagementModalProps> = ({
-  products,
+  products = [],
   config,
   isOpen,
   onClose,
@@ -87,14 +87,19 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
   const [newPresContent, setNewPresContent] = useState('1');
   const [newPresPrice, setNewPresPrice] = useState('');
 
-  if (!isOpen) return null;
+  const exchangeRate = config?.exchangeRate || 42.00;
+  const ivaRate = config?.ivaRate ?? 0.16;
 
-  const categories = ['Todos', ...Array.from(new Set(products.map((p) => p.category)))];
+  // Safe category extraction
+  const categories = ['Todos', ...Array.from(new Set((products || []).map((p) => p?.category).filter(Boolean)))];
 
   // Dynamic Effective Cost: System ALWAYS takes the MAXIMUM cost among all associated suppliers
-  const supplierCosts = formSuppliers.map((s) => s.costPriceUsd).filter((c) => !isNaN(c) && c > 0);
+  const supplierCosts = (formSuppliers || [])
+    .map((s) => s.costPriceUsd)
+    .filter((c) => typeof c === 'number' && !isNaN(c) && c > 0);
   const maxSupplierCost = supplierCosts.length > 0 ? Math.max(...supplierCosts) : 0;
-  const effectiveCostUsd = supplierCosts.length > 0 ? maxSupplierCost : (parseFloat(formManualBaseCost) || 0);
+  const manualBaseCostNum = parseFloat(formManualBaseCost) || 0;
+  const effectiveCostUsd = supplierCosts.length > 0 ? maxSupplierCost : manualBaseCostNum;
 
   // Total Cost with Additional Expenses (Fletes, impuestos municipales)
   const expensesPct = parseFloat(formAdditionalExpenses) || 0;
@@ -119,22 +124,28 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
       const calculated = costWithExpensesUsd * (1 + targetGap / 100);
       setFormFinalPriceUsd(calculated > 0 ? calculated.toFixed(2) : '0.00');
     }
-    // In 'fixed_price', user edits formFinalPriceUsd directly
   }, [effectiveCostUsd, formAdditionalExpenses, formProfitMargin, formPricingEngine]);
 
   // When in fixed_price mode, compute real effective profit margin
   const finalPriceNum = parseFloat(formFinalPriceUsd) || 0;
   const realProfitMarginPct = costWithExpensesUsd > 0 ? ((finalPriceNum - costWithExpensesUsd) / costWithExpensesUsd) * 100 : 0;
   const realProfitUsd = finalPriceNum - costWithExpensesUsd;
-  const finalPriceBs = finalPriceNum * config.exchangeRate;
+  const finalPriceBs = finalPriceNum * exchangeRate;
 
-  const filteredProducts = products.filter((prod) => {
+  if (!isOpen) return null;
+
+  const filteredProducts = (products || []).filter((prod) => {
+    if (!prod) return false;
     const matchesCategory = selectedCategory === 'Todos' || prod.category === selectedCategory;
-    const matchesSearch =
-      prod.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      prod.barcode.includes(searchTerm) ||
-      (prod.description && prod.description.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    const query = (searchTerm || '').toLowerCase().trim();
+    if (!query) return matchesCategory;
+
+    const barcodeMatch = prod.barcode ? prod.barcode.toLowerCase().includes(query) : false;
+    const nameMatch = prod.name ? prod.name.toLowerCase().includes(query) : false;
+    const descMatch = prod.description ? prod.description.toLowerCase().includes(query) : false;
+    const catMatch = prod.category ? prod.category.toLowerCase().includes(query) : false;
+
+    return matchesCategory && (barcodeMatch || nameMatch || descMatch || catMatch);
   });
 
   const handleStartCreate = () => {
@@ -168,21 +179,21 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
     sound.playClick();
     setEditingProduct(prod);
     setIsCreatingNew(true);
-    setFormBarcode(prod.barcode);
-    setFormName(prod.name);
+    setFormBarcode(prod.barcode || '');
+    setFormName(prod.name || '');
     setFormDescription(prod.description || '');
-    setFormCategory(prod.category);
-    setFormUnitOfMeasure(prod.unitOfMeasure);
+    setFormCategory(prod.category || 'Víveres');
+    setFormUnitOfMeasure(prod.unitOfMeasure || 'UND');
     setFormContentNominal(prod.contentNominal ? prod.contentNominal.toString() : '1');
     setFormContentUnit(prod.contentUnit || (prod.unitOfMeasure === 'KG' ? 'g' : prod.unitOfMeasure === 'LTS' ? 'ml' : 'uds'));
-    setFormStock(prod.stock.toString());
-    setFormStockMin(prod.stockMin ? prod.stockMin.toString() : '10');
-    setFormHasTax(prod.hasTax);
-    setFormManualBaseCost(prod.baseCostUsd ? prod.baseCostUsd.toString() : (prod.priceUsd * 0.75).toFixed(2));
-    setFormProfitMargin(prod.profitMarginPercent ? prod.profitMarginPercent.toString() : '30');
-    setFormAdditionalExpenses(prod.additionalExpensesPercent ? prod.additionalExpensesPercent.toString() : '5');
+    setFormStock((prod.stock ?? 50).toString());
+    setFormStockMin((prod.stockMin ?? 10).toString());
+    setFormHasTax(prod.hasTax !== false);
+    setFormManualBaseCost(prod.baseCostUsd ? prod.baseCostUsd.toString() : ((prod.priceUsd || 0) * 0.75).toFixed(2));
+    setFormProfitMargin((prod.profitMarginPercent ?? 30).toString());
+    setFormAdditionalExpenses((prod.additionalExpensesPercent ?? 5).toString());
     setFormPricingEngine(prod.pricingEngine || 'fixed_price');
-    setFormFinalPriceUsd(prod.priceUsd.toString());
+    setFormFinalPriceUsd((prod.priceUsd || 0).toString());
     setFormSuppliers(prod.suppliers || []);
     setFormAllowsSmallerUnit(!!prod.allowsSmallerUnit);
     setFormUnitPriceUsd(prod.unitPriceUsd ? prod.unitPriceUsd.toString() : '');
@@ -276,7 +287,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
       suppliers: formSuppliers,
       stock: parseInt(formStock, 10) || 50,
       stockMin: parseInt(formStockMin, 10) || 10,
-      imageUrl: editingProduct ? editingProduct.imageUrl : '',
+      imageUrl: '',
       hasTax: formHasTax,
       allowsSmallerUnit: formAllowsSmallerUnit,
       unitPriceUsd: formAllowsSmallerUnit && formUnitPriceUsd ? parseFloat(formUnitPriceUsd) : undefined,
@@ -298,8 +309,8 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 md:p-6 animate-fade-in">
-      <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full overflow-hidden flex flex-col max-h-[95vh] border border-slate-300">
+    <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/65 backdrop-blur-xs p-3 md:p-6 animate-fade-in">
+      <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full overflow-hidden flex flex-col max-h-[94vh] border border-slate-300">
         
         {/* Header */}
         <div className="bg-[#1b4e8c] text-white px-6 py-3.5 flex items-center justify-between shrink-0">
@@ -359,50 +370,69 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                 }}
                 className="w-full sm:w-auto px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 pos-btn cursor-pointer"
               >
-                <span>← Volver al Listado</span>
+                <span>Volver a la Lista</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50">
+        {/* Categories Bar (when viewing list) */}
+        {!isCreatingNew && (
+          <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto shrink-0">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => {
+                  sound.playClick();
+                  setSelectedCategory(cat);
+                }}
+                className={`px-3 py-1 text-xs font-semibold rounded-md whitespace-nowrap transition-colors cursor-pointer ${
+                  selectedCategory === cat
+                    ? 'bg-[#1b4e8c] text-white shadow-xs'
+                    : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Modal Main Body */}
+        <div className="p-4 md:p-6 overflow-y-auto flex-1 max-h-[70vh]">
           {isCreatingNew ? (
             /* ===================================================================== */
-            /* COMPLETE ADVANCED PRODUCT CREATION / EDITING FORM */
+            /* CREATE / EDIT PRODUCT FORM WITH SUPPLIER MAX COST & PRICING ENGINE */
             /* ===================================================================== */
-            <form onSubmit={handleSubmitForm} className="max-w-4xl mx-auto bg-white p-6 rounded-xl border border-slate-300 shadow-sm space-y-6">
+            <form onSubmit={handleSubmitForm} className="space-y-6 max-w-4xl mx-auto">
               
-              <div className="flex items-center justify-between border-b pb-3">
-                <div className="flex items-center gap-2 text-[#1b4e8c]">
-                  <Tag className="w-5 h-5" />
-                  <h3 className="font-black text-slate-900 text-base">
-                    {editingProduct ? `Editar Producto: ${editingProduct.name}` : 'Crear Nuevo Producto en Inventario'}
+              {/* 1. INFORMACIÓN BÁSICA */}
+              <div className="space-y-4">
+                <div className="border-b pb-2 flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-[#1b4e8c] uppercase tracking-wide flex items-center gap-2">
+                    <Tag className="w-4 h-4" />
+                    <span>1. Información Básica del Producto</span>
                   </h3>
+                  <span className="text-xs text-slate-400">
+                    {editingProduct ? 'Editando Producto Existente' : 'Nuevo Registro de Inventario'}
+                  </span>
                 </div>
-                <span className="text-xs font-bold text-blue-900 bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
-                  Tasa del Sistema: {config.exchangeRate.toFixed(2)} Bs / USD
-                </span>
-              </div>
 
-              {/* 1. INFORMACIÓN BÁSICA DEL PRODUCTO */}
-              <div className="space-y-3">
-                <h4 className="font-bold text-xs text-slate-700 uppercase tracking-wider">1. Datos Principales</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Barcode input (supports physical scanner) */}
+                  {/* Barcode */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1">
-                      Código de Barras *
+                    <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
+                      <Barcode className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Código de Barras / SKU *</span>
                     </label>
                     <div className="relative">
-                      <Barcode className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                       <input
                         type="text"
                         required
                         value={formBarcode}
                         onChange={(e) => setFormBarcode(e.target.value)}
                         placeholder="Pistolea o escribe código"
-                        className="w-full pl-9 pr-3 py-2 text-xs font-mono font-bold border-2 border-slate-300 rounded-lg focus:border-[#1b4e8c] focus:outline-hidden"
+                        className="w-full px-3 py-2 text-xs font-mono font-bold border-2 border-slate-300 rounded-lg focus:border-[#1b4e8c] focus:outline-hidden"
                       />
                     </div>
                   </div>
@@ -550,7 +580,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                   <button
                     type="button"
                     onClick={handleAddSupplier}
-                    className="px-3 py-1.5 bg-[#1b4e8c] hover:bg-[#153e6d] text-white text-xs font-bold rounded pos-btn flex items-center justify-center gap-1"
+                    className="px-3 py-1.5 bg-[#1b4e8c] hover:bg-[#153e6d] text-white text-xs font-bold rounded pos-btn flex items-center justify-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>+ Agregar Proveedor</span>
@@ -580,12 +610,12 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="font-mono font-bold text-slate-900 text-sm">
-                              ${sup.costPriceUsd.toFixed(2)} USD
+                              ${(sup.costPriceUsd || 0).toFixed(2)} USD
                             </span>
                             <button
                               type="button"
                               onClick={() => handleRemoveSupplier(sup.id)}
-                              className="text-red-500 hover:text-red-700 p-1"
+                              className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -639,7 +669,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
                     </div>
                     <span className="text-[10px] text-slate-500 mt-0.5 block font-mono">
-                      Costo + Gastos: ${costWithExpensesUsd.toFixed(2)}
+                      Costo + Gastos: ${(costWithExpensesUsd || 0).toFixed(2)}
                     </span>
                   </div>
 
@@ -659,7 +689,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
                     </div>
                     <span className="text-[10px] text-emerald-700 font-bold mt-0.5 block font-mono">
-                      Ganancia Est.: +${realProfitUsd.toFixed(2)} USD
+                      Ganancia Est.: +${(realProfitUsd || 0).toFixed(2)} USD
                     </span>
                   </div>
 
@@ -712,10 +742,10 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                       Equivalente en Bolívares (Bs.):
                     </span>
                     <div className="text-2xl font-black font-mono text-blue-300 mt-1">
-                      Bs. {finalPriceBs.toFixed(2)}
+                      Bs. {(finalPriceBs || 0).toFixed(2)}
                     </div>
                     <span className="text-[11px] text-slate-400 font-mono">
-                      Margen real obtenido: {realProfitMarginPct.toFixed(1)}%
+                      Margen real obtenido: {(realProfitMarginPct || 0).toFixed(1)}%
                     </span>
                   </div>
                 </div>
@@ -821,7 +851,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                     <button
                       type="button"
                       onClick={handleAddPresentation}
-                      className="px-3 py-1 bg-[#1b4e8c] hover:bg-[#153e6d] text-white text-xs font-bold rounded pos-btn"
+                      className="px-3 py-1 bg-[#1b4e8c] hover:bg-[#153e6d] text-white text-xs font-bold rounded pos-btn cursor-pointer"
                     >
                       + Agregar
                     </button>
@@ -833,11 +863,11 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                         <div key={pres.id} className="flex items-center justify-between px-3 py-1 bg-white border border-slate-200 rounded text-xs">
                           <span className="font-bold">{pres.name} ({pres.unitOfMeasure})</span>
                           <div className="flex items-center gap-3">
-                            <span className="font-mono font-bold text-blue-900">${pres.priceUsd.toFixed(2)} USD</span>
+                            <span className="font-mono font-bold text-blue-900">${(pres.priceUsd || 0).toFixed(2)} USD</span>
                             <button
                               type="button"
                               onClick={() => handleRemovePresentation(pres.id)}
-                              className="text-red-500 hover:text-red-700"
+                              className="text-red-500 hover:text-red-700 cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -859,7 +889,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                   className="w-4 h-4 text-[#1b4e8c] rounded cursor-pointer"
                 />
                 <label htmlFor="taxCheck" className="text-xs font-bold text-slate-800 cursor-pointer">
-                  Aplica IVA ({Math.round(config.ivaRate * 100)}%)
+                  Aplica IVA ({Math.round(ivaRate * 100)}%)
                 </label>
               </div>
 
@@ -868,13 +898,13 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                 <button
                   type="button"
                   onClick={() => setIsCreatingNew(false)}
-                  className="flex-1 py-2.5 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-xs"
+                  className="flex-1 py-2.5 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-xs cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 px-4 bg-[#1b4e8c] hover:bg-[#153e6d] text-white font-bold rounded-lg text-xs pos-btn flex items-center justify-center gap-2 shadow-sm"
+                  className="flex-1 py-2.5 px-4 bg-[#1b4e8c] hover:bg-[#153e6d] text-white font-bold rounded-lg text-xs pos-btn flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
                   <span>Guardar Producto en Inventario</span>
@@ -901,77 +931,93 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {filteredProducts.map((prod) => {
-                    const priceBs = prod.priceUsd * config.exchangeRate;
-                    const isLowStock = prod.stockMin !== undefined && prod.stock <= prod.stockMin;
-                    const supCount = prod.suppliers ? prod.suppliers.length : 0;
-                    const maxCost = prod.baseCostUsd || (prod.suppliers && prod.suppliers.length > 0 ? Math.max(...prod.suppliers.map(s => s.costPriceUsd)) : prod.priceUsd * 0.7);
+                  {filteredProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-400">
+                        <Package className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                        <span className="font-bold text-sm block text-slate-600">No se encontraron productos</span>
+                        <span className="text-xs">Prueba con otro término de búsqueda o registra un nuevo producto</span>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProducts.map((prod) => {
+                      const priceNum = typeof prod.priceUsd === 'number' ? prod.priceUsd : (parseFloat(String(prod.priceUsd)) || 0);
+                      const priceBs = priceNum * exchangeRate;
+                      const isLowStock = prod.stockMin !== undefined && prod.stock <= prod.stockMin;
+                      const supList = Array.isArray(prod.suppliers) ? prod.suppliers : [];
+                      const supCount = supList.length;
+                      const supCosts = supList.map(s => s.costPriceUsd).filter(c => typeof c === 'number' && !isNaN(c) && c > 0);
+                      const maxCost = typeof prod.baseCostUsd === 'number' 
+                        ? prod.baseCostUsd 
+                        : (supCosts.length > 0 ? Math.max(...supCosts) : priceNum * 0.7);
+                      const safeMaxCost = isFinite(maxCost) ? maxCost : 0;
 
-                    return (
-                      <tr key={prod.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-3.5 py-2.5 font-mono font-bold text-slate-600">
-                          {prod.barcode}
-                        </td>
-                        <td className="px-3.5 py-2.5">
-                          <div className="font-bold text-slate-900 text-sm">{prod.name}</div>
-                          <div className="text-[11px] text-slate-500">
-                            {prod.category} {prod.presentation ? `• ${prod.presentation}` : ''}
-                          </div>
-                        </td>
-                        <td className="px-3.5 py-2.5 text-center">
-                          <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded font-bold font-mono text-[10px]">
-                            {prod.unitOfMeasure}
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2.5 text-right font-mono font-bold text-slate-600">
-                          ${maxCost.toFixed(2)}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-right font-black font-mono text-sm text-slate-900">
-                          ${prod.priceUsd.toFixed(2)}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-right font-semibold font-mono text-blue-900">
-                          Bs. {priceBs.toFixed(2)}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${supCount > 0 ? 'bg-blue-50 text-blue-800 border border-blue-200' : 'text-slate-400'}`}>
-                            {supCount > 0 ? `${supCount} prov.` : 'Directo'}
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2.5 text-center font-mono">
-                          {isLowStock ? (
-                            <span className="px-2 py-0.5 bg-red-50 text-red-800 border border-red-200 rounded font-bold text-[10px]" title="Stock al límite o por debajo del mínimo">
-                              ⚠️ {prod.stock} / {prod.stockMin || 10}
+                      return (
+                        <tr key={prod.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-3.5 py-2.5 font-mono font-bold text-slate-600">
+                            {prod.barcode || '-'}
+                          </td>
+                          <td className="px-3.5 py-2.5">
+                            <div className="font-bold text-slate-900 text-sm">{prod.name}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {prod.category || 'General'} {prod.presentation ? `• ${prod.presentation}` : ''}
+                            </div>
+                          </td>
+                          <td className="px-3.5 py-2.5 text-center">
+                            <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded font-bold font-mono text-[10px]">
+                              {prod.unitOfMeasure || 'UND'}
                             </span>
-                          ) : (
-                            <span className="font-bold text-slate-800">
-                              {prod.stock} (Mín: {prod.stockMin || 10})
+                          </td>
+                          <td className="px-3.5 py-2.5 text-right font-mono font-bold text-slate-600">
+                            ${safeMaxCost.toFixed(2)}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-right font-black font-mono text-sm text-slate-900">
+                            ${priceNum.toFixed(2)}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-right font-semibold font-mono text-blue-900">
+                            Bs. {priceBs.toFixed(2)}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-center">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${supCount > 0 ? 'bg-blue-50 text-blue-800 border border-blue-200' : 'text-slate-400'}`}>
+                              {supCount > 0 ? `${supCount} prov.` : 'Directo'}
                             </span>
-                          )}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              onClick={() => handleStartEdit(prod)}
-                              className="p-1.5 hover:bg-blue-100 text-blue-800 rounded transition-colors"
-                              title="Editar producto y costos"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                sound.playClick();
-                                onDeleteProduct(prod.id);
-                              }}
-                              className="p-1.5 hover:bg-red-100 text-red-600 rounded transition-colors"
-                              title="Eliminar producto"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-center font-mono">
+                            {isLowStock ? (
+                              <span className="px-2 py-0.5 bg-red-50 text-red-800 border border-red-200 rounded font-bold text-[10px]" title="Stock al límite o por debajo del mínimo">
+                                ⚠️ {prod.stock} / {prod.stockMin || 10}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-slate-800">
+                                {prod.stock} (Mín: {prod.stockMin || 10})
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handleStartEdit(prod)}
+                                className="p-1.5 hover:bg-blue-100 text-blue-800 rounded transition-colors cursor-pointer"
+                                title="Editar producto y costos"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  sound.playClick();
+                                  onDeleteProduct(prod.id);
+                                }}
+                                className="p-1.5 hover:bg-red-100 text-red-600 rounded transition-colors cursor-pointer"
+                                title="Eliminar producto"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
