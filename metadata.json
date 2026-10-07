@@ -1,0 +1,6 @@
+{
+  "name": "Punto de Venta Sol v3.1",
+  "description": "Sistema POS profesional para Bodega El Sol con facturación dual en USD y Bolívares, gestión de inventario y caja registradora táctil.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
