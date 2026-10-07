@@ -23,7 +23,8 @@ import {
   Building2,
   ShieldAlert,
   HelpCircle,
-  Calculator
+  Calculator,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface InventoryManagementModalProps {
@@ -33,6 +34,7 @@ interface InventoryManagementModalProps {
   onClose: () => void;
   onSaveProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
+  onOpenKardex?: (product: Product) => void;
 }
 
 export const InventoryManagementModal: React.FC<InventoryManagementModalProps> = ({
@@ -42,6 +44,7 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
   onClose,
   onSaveProduct,
   onDeleteProduct,
+  onOpenKardex,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
@@ -413,9 +416,21 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                     <Tag className="w-4 h-4" />
                     <span>1. Información Básica del Producto</span>
                   </h3>
-                  <span className="text-xs text-slate-400">
-                    {editingProduct ? 'Editando Producto Existente' : 'Nuevo Registro de Inventario'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {editingProduct && onOpenKardex && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenKardex(editingProduct)}
+                        className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded font-bold text-xs flex items-center gap-1.5 pos-btn cursor-pointer"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Ver Ficha de Kardex</span>
+                      </button>
+                    )}
+                    <span className="text-xs text-slate-400">
+                      {editingProduct ? 'Editando Producto Existente' : 'Nuevo Registro de Inventario'}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -994,7 +1009,16 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
                             )}
                           </td>
                           <td className="px-3.5 py-2.5 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex items-center justify-center gap-1">
+                              {onOpenKardex && (
+                                <button
+                                  onClick={() => onOpenKardex(prod)}
+                                  className="p-1.5 hover:bg-emerald-100 text-emerald-800 rounded transition-colors cursor-pointer"
+                                  title="Ver Ficha de Kardex y Movimientos"
+                                >
+                                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleStartEdit(prod)}
                                 className="p-1.5 hover:bg-blue-100 text-blue-800 rounded transition-colors cursor-pointer"

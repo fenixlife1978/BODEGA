@@ -8,6 +8,8 @@ import { ReceiptModal } from './components/ReceiptModal';
 import { MenuDrawer } from './components/MenuDrawer';
 import { InventoryManagementModal } from './components/InventoryManagementModal';
 import { FractionalProductSelectorModal } from './components/FractionalProductSelectorModal';
+import { KardexModal } from './components/KardexModal';
+import { KardexMovement } from './types/pos';
 import {
   Search,
   Trash2,
@@ -22,7 +24,8 @@ import {
   Droplets,
   Barcode,
   CheckCircle2,
-  Layers
+  Layers,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export default function App() {
@@ -31,6 +34,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [config, setConfig] = useState<PosConfig>(INITIAL_CONFIG);
   const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
+  const [kardexMovements, setKardexMovements] = useState<KardexMovement[]>([]);
 
   // Search in header state
   const [headerSearch, setHeaderSearch] = useState('');
@@ -41,6 +45,7 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [selectedFractionalProduct, setSelectedFractionalProduct] = useState<Product | null>(null);
+  const [selectedKardexProduct, setSelectedKardexProduct] = useState<Product | null>(null);
   const [barcodeNotification, setBarcodeNotification] = useState<string | null>(null);
 
   const [paymentModalState, setPaymentModalState] = useState<{
@@ -144,6 +149,7 @@ export default function App() {
         if (isAddModalOpen) setIsAddModalOpen(false);
         if (isInventoryModalOpen) setIsInventoryModalOpen(false);
         if (selectedFractionalProduct) setSelectedFractionalProduct(null);
+        if (selectedKardexProduct) setSelectedKardexProduct(null);
         if (paymentModalState.isOpen) setPaymentModalState({ isOpen: false, initialTab: 'all' });
         if (receiptModalState.isOpen) setReceiptModalState({ isOpen: false, sale: null });
         if (isMenuOpen) setIsMenuOpen(false);
@@ -152,7 +158,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cart, products, isAddModalOpen, isInventoryModalOpen, selectedFractionalProduct, paymentModalState, receiptModalState, isMenuOpen]);
+  }, [cart, products, isAddModalOpen, isInventoryModalOpen, selectedFractionalProduct, selectedKardexProduct, paymentModalState, receiptModalState, isMenuOpen]);
 
   // Cart Calculations with item-level tax awareness
   const calculateSubtotalUsd = () => {
@@ -286,13 +292,16 @@ export default function App() {
   };
 
   const handleCompleteSale = (payments: PaymentBreakdown, changeUsd: number, changeBs: number) => {
+    const receiptNum = (1000 + salesHistory.length + 1).toString();
+    const formattedTimestamp = new Date().toLocaleString('es-VE', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+
     const saleRecord: SaleRecord = {
       id: 'sale-' + Date.now(),
-      receiptNumber: (1000 + salesHistory.length + 1).toString(),
-      timestamp: new Date().toLocaleString('es-VE', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }),
+      receiptNumber: receiptNum,
+      timestamp: formattedTimestamp,
       items: [...cart],
       subtotalUsd,
       taxUsd,
@@ -309,11 +318,72 @@ export default function App() {
       status: 'COMPLETADA',
     };
 
+    // Automatically record Kardex movements & update stocks for each sold product
+    const newMovements: KardexMovement[] = [];
+    setProducts((prevProducts) => {
+      const updatedProducts = [...prevProducts];
+      cart.forEach((cartItem) => {
+        const prodIndex = updatedProducts.findIndex((p) => p.id === cartItem.product.id);
+        if (prodIndex > -1) {
+          const prod = updatedProducts[prodIndex];
+          const prevStock = prod.stock;
+          const soldQty = cartItem.quantity;
+          const newStock = Math.max(0, Number((prevStock - soldQty).toFixed(3)));
+          
+          updatedProducts[prodIndex] = {
+            ...prod,
+            stock: newStock,
+          };
+
+          const unitCost = prod.baseCostUsd || (prod.priceUsd * 0.75);
+          newMovements.push({
+            id: 'kardex-pos-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+            productId: prod.id,
+            timestamp: formattedTimestamp,
+            type: 'VENTA',
+            reference: `Factura POS #${receiptNum}`,
+            quantity: soldQty,
+            previousStock: prevStock,
+            resultingStock: newStock,
+            unitCostUsd: unitCost,
+            totalCostUsd: unitCost * soldQty,
+            responsible: config.cashierName || 'Caja 1',
+            notes: `Venta despachada (${payments.cashUsd > 0 ? 'Efectivo USD' : payments.cardBs > 0 ? 'Punto Tarjeta' : 'Pago Móvil'})`,
+          });
+        }
+      });
+      return updatedProducts;
+    });
+
+    if (newMovements.length > 0) {
+      setKardexMovements((prev) => [...newMovements, ...prev]);
+    }
+
     setSalesHistory((prev) => [saleRecord, ...prev]);
     setLastCambio({ usd: changeUsd, bs: changeBs });
     setPaymentModalState({ isOpen: false, initialTab: 'all' });
     setReceiptModalState({ isOpen: true, sale: saleRecord });
     setCart([]);
+  };
+
+  const handleAddKardexMovement = (movement: KardexMovement, updatedProductStock: number) => {
+    setKardexMovements((prev) => [movement, ...prev]);
+    setProducts((prev) => {
+      const idx = prev.findIndex((p) => p.id === movement.productId);
+      if (idx > -1) {
+        const copy = [...prev];
+        copy[idx] = {
+          ...copy[idx],
+          stock: updatedProductStock,
+        };
+        // Also update selectedKardexProduct if currently viewing it
+        if (selectedKardexProduct && selectedKardexProduct.id === copy[idx].id) {
+          setSelectedKardexProduct(copy[idx]);
+        }
+        return copy;
+      }
+      return prev;
+    });
   };
 
   // Intelligent Search Filter: matches keywords, names, barcodes, categories
@@ -560,9 +630,13 @@ export default function App() {
                       >
                         {/* 1. PRIMERA COLUMNA: CÓDIGO */}
                         <div className="w-28 shrink-0">
-                          <span className="font-mono text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-300 tracking-tight select-all">
+                          <button
+                            onClick={() => setSelectedKardexProduct(item.product)}
+                            className="font-mono text-xs font-bold text-slate-700 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-300 px-2 py-0.5 rounded border border-slate-300 tracking-tight cursor-pointer transition-colors"
+                            title="Clic para ver Ficha de Kardex"
+                          >
                             {item.product.barcode}
-                          </span>
+                          </button>
                         </div>
 
                         {/* 2. DESCRIPCIÓN (Clean Text, clickable to change presentation) */}
@@ -685,14 +759,21 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* 8. ACCIÓN ELIMINAR */}
-                        <div className="w-7 text-center shrink-0">
+                        {/* 8. ACCIONES: KARDEX & ELIMINAR */}
+                        <div className="w-12 text-center shrink-0 flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => setSelectedKardexProduct(item.product)}
+                            className="text-slate-400 hover:text-emerald-700 transition-colors p-1 cursor-pointer"
+                            title="Ver Ficha de Kardex del producto"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleRemoveItem(index)}
                             className="text-slate-400 hover:text-red-500 transition-colors p-1 cursor-pointer"
                             title="Eliminar artículo"
                           >
-                            <WindowClose className="w-4 h-4" />
+                            <WindowClose className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -869,6 +950,7 @@ export default function App() {
         onDeleteProduct={(id) => {
           setProducts((prev) => prev.filter((p) => p.id !== id));
         }}
+        onOpenKardex={(prod) => setSelectedKardexProduct(prod)}
       />
 
       {/* Add Product Modal (Catalog view) */}
@@ -887,6 +969,19 @@ export default function App() {
             setIsAddModalOpen(false);
             setIsInventoryModalOpen(true);
           }}
+          onOpenKardex={(prod) => setSelectedKardexProduct(prod)}
+        />
+      )}
+
+      {/* Kardex Modal */}
+      {selectedKardexProduct && (
+        <KardexModal
+          product={selectedKardexProduct}
+          config={config}
+          isOpen={!!selectedKardexProduct}
+          onClose={() => setSelectedKardexProduct(null)}
+          kardexMovements={kardexMovements}
+          onAddKardexMovement={handleAddKardexMovement}
         />
       )}
 

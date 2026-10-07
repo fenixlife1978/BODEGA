@@ -95,6 +95,21 @@ export interface SaleRecord {
   status: 'COMPLETADA' | 'ANULADA';
 }
 
+export interface KardexMovement {
+  id: string;
+  productId: string;
+  timestamp: string;
+  type: 'ENTRADA' | 'VENTA' | 'AJUSTE_POSITIVO' | 'AJUSTE_NEGATIVO' | 'MERMA' | 'DEVOLUCION';
+  reference: string; // e.g. "Ticket #1001", "OC-8821 Polar", "Ajuste de Auditoría", "Recepción Inicial"
+  quantity: number; // positive for entries, positive for sales amount
+  previousStock: number;
+  resultingStock: number;
+  unitCostUsd: number;
+  totalCostUsd: number;
+  responsible: string;
+  notes?: string;
+}
+
 export interface PosConfig {
   storeName: string;
   registerName: string;

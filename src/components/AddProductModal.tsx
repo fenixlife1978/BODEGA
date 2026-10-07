@@ -9,7 +9,8 @@ import {
   Barcode,
   ShoppingBag,
   Tag,
-  Scale
+  Scale,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface AddProductModalProps {
@@ -19,6 +20,7 @@ interface AddProductModalProps {
   onAddProductToCart: (product: Product, quantity: number) => void;
   onAddNewProductToCatalog: (newProd: Product) => void;
   onOpenInventoryModal?: () => void;
+  onOpenKardex?: (product: Product) => void;
 }
 
 export const AddProductModal: React.FC<AddProductModalProps> = ({
@@ -28,6 +30,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   onAddProductToCart,
   onAddNewProductToCatalog,
   onOpenInventoryModal,
+  onOpenKardex,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
@@ -403,17 +406,32 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectProduct(prod);
-                        }}
-                        className={`p-1.5 text-white rounded-lg shadow-xs pos-btn ${prod.isWeighted ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#1e4b85] hover:bg-[#163f73]'}`}
-                        title={prod.isWeighted ? 'Pesar / Ingresar Cantidad (Kg)' : 'Añadir 1 Unidad'}
-                      >
-                        {prod.isWeighted ? <Scale className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        {onOpenKardex && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenKardex(prod);
+                            }}
+                            className="p-1.5 text-slate-600 hover:text-emerald-700 bg-slate-100 hover:bg-emerald-50 border border-slate-300 rounded-lg shadow-2xs pos-btn cursor-pointer"
+                            title="Ver Ficha de Kardex del Producto"
+                          >
+                            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectProduct(prod);
+                          }}
+                          className={`p-1.5 text-white rounded-lg shadow-xs pos-btn cursor-pointer ${prod.isWeighted ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#1e4b85] hover:bg-[#163f73]'}`}
+                          title={prod.isWeighted ? 'Pesar / Ingresar Cantidad (Kg)' : 'Añadir 1 Unidad'}
+                        >
+                          {prod.isWeighted ? <Scale className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
