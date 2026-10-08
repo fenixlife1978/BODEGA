@@ -180,3 +180,18 @@ export interface PosConfig {
   printShowBarcode?: boolean;
   printCopies?: number;
 }
+
+export interface ExchangeRateHistoryEntry {
+  id: string;
+  timestamp: string; // ISO string
+  dateFormatted: string; // e.g. "08 Oct 2026 10:24 AM"
+  effectiveDate?: string; // e.g. "2026-10-08"
+  rate: number; // Tasa en Bs. (USD)
+  previousRate: number; // Tasa anterior
+  changePercent: number; // % de cambio (e.g. +0.10)
+  changeAmount: number; // Variación en Bs. (e.g. +0.86)
+  eurRate?: number; // Tasa EUR si disponible
+  source: string; // "bcv.today (Fuente Oficial API)" | "Manual"
+  isAutomated: boolean;
+}
+

@@ -8,12 +8,18 @@ import {
   Customer,
   CreditPaymentRecord,
   ReturnRecord,
-  KardexMovement
+  KardexMovement,
+  ExchangeRateHistoryEntry,
 } from './types/pos';
 import { INITIAL_PRODUCTS, INITIAL_CART, INITIAL_CONFIG } from './data/initialProducts';
 import { INITIAL_CUSTOMERS } from './data/initialCustomers';
 import { sound } from './utils/sound';
-import { fetchBcvRate } from './services/bcvService';
+import {
+  fetchBcvRate,
+  getExchangeRateHistory,
+  recordRateVariation,
+  seedHistoryFromBcvToday,
+} from './services/bcvService';
 import { BcvLogo } from './components/BcvLogo';
 import { AddProductModal } from './components/AddProductModal';
 import { PaymentModal } from './components/PaymentModal';
@@ -76,10 +82,14 @@ export default function App() {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // BCV Live Rate State
+  // BCV Live Rate State & Variation History
   const [bcvLoading, setBcvLoading] = useState(false);
   const [bcvLastSync, setBcvLastSync] = useState<string>('');
   const [bcvSource, setBcvSource] = useState<string>('bcv.today');
+  const [rateHistory, setRateHistory] = useState<ExchangeRateHistoryEntry[]>(() => getExchangeRateHistory());
+  const [bcvChangePercent, setBcvChangePercent] = useState<number>(() => getExchangeRateHistory()[0]?.changePercent ?? 0);
+  const [bcvChangeAmount, setBcvChangeAmount] = useState<number>(() => getExchangeRateHistory()[0]?.changeAmount ?? 0);
+  const [menuInitialTab, setMenuInitialTab] = useState<'tasa' | 'impresion' | 'history' | 'cierre' | 'settings' | 'shortcuts'>('tasa');
 
   // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -142,18 +152,63 @@ export default function App() {
     const result = await fetchBcvRate();
     if (result.success && result.rate > 0) {
       setConfig((prev) => ({ ...prev, exchangeRate: result.rate }));
+      const updatedHistory = getExchangeRateHistory();
+      setRateHistory(updatedHistory);
+      if (result.changePercent !== undefined) {
+        setBcvChangePercent(result.changePercent);
+      }
+      if (result.changeAmount !== undefined) {
+        setBcvChangeAmount(result.changeAmount);
+      }
     }
     setBcvLoading(false);
     setBcvLastSync(result.lastUpdated);
     setBcvSource(result.source);
   };
 
+  // Initial seed from bcv.today history and automatic synchronization
   useEffect(() => {
-    syncBcvRate();
+    const initRateAndHistory = async () => {
+      // If local history is empty, seed from bcv.today
+      const seeded = await seedHistoryFromBcvToday();
+      if (seeded && seeded.length > 0) {
+        setRateHistory(seeded);
+        if (seeded[0]) {
+          setBcvChangePercent(seeded[0].changePercent);
+          setBcvChangeAmount(seeded[0].changeAmount);
+        }
+      }
+      await syncBcvRate();
+    };
+
+    initRateAndHistory();
     // Re-sync rate every 5 minutes automatically
     const interval = setInterval(syncBcvRate, 300000);
     return () => clearInterval(interval);
   }, []);
+
+  // Manual rate override that preserves and updates variation history
+  const handleManualRecordRate = (newRate: number) => {
+    const { history, entry } = recordRateVariation(newRate, {
+      source: 'Manual (Supervisor POS)',
+      isAutomated: false,
+    });
+    setConfig((prev) => ({ ...prev, exchangeRate: newRate }));
+    setRateHistory(history);
+    if (entry) {
+      setBcvChangePercent(entry.changePercent);
+      setBcvChangeAmount(entry.changeAmount);
+    }
+  };
+
+  // Reload official history directly from bcv.today
+  const handleReloadOfficialHistory = async () => {
+    setBcvLoading(true);
+    const seeded = await seedHistoryFromBcvToday();
+    setRateHistory(seeded);
+    await syncBcvRate();
+    setBcvLoading(false);
+  };
 
   // Next Invoice Sequence
   const currentInvoiceNumber = (1000 + salesHistory.length + 1).toString().padStart(6, '0');
@@ -683,27 +738,46 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center: VISIBLE OFFICIAL BCV RATE WITH LOGO & AUTO-UPDATE */}
-        <div className="flex items-center gap-2 bg-[#0e2c54]/90 px-3.5 py-1.5 rounded-xl border border-amber-400/40 shadow-inner">
-          <BcvLogo className="w-7 h-7 shrink-0 drop-shadow-xs" />
+        {/* Center: VISIBLE OFFICIAL BCV RATE WITH LOGO, CHANGE % & AUTO-UPDATE */}
+        <div
+          onClick={() => {
+            sound.playClick();
+            setMenuInitialTab('tasa');
+            setIsMenuOpen(true);
+          }}
+          title="Sincronización con bcv.today • Fuente Oficial API: https://bcv.today/api/rate.json (Clic para ver historial)"
+          className="flex items-center gap-2 bg-[#0e2c54]/90 hover:bg-[#0e2c54] px-3.5 py-1.5 rounded-xl border border-amber-400/40 hover:border-amber-400/80 shadow-inner cursor-pointer transition-all group"
+        >
+          <BcvLogo className="w-7 h-7 shrink-0 drop-shadow-xs group-hover:scale-105 transition-transform" />
           <div className="flex flex-col text-left">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-black uppercase tracking-wider text-amber-300">
                 Tasa Oficial BCV
               </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Tasa en vivo" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Sincronización en vivo con bcv.today" />
+              {bcvChangePercent !== 0 && (
+                <span className={`text-[9px] font-black px-1.5 py-0.2 rounded font-mono ${
+                  bcvChangePercent > 0
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                }`}>
+                  {bcvChangePercent > 0 ? `▲ +${bcvChangePercent.toFixed(2)}%` : `▼ ${bcvChangePercent.toFixed(2)}%`}
+                </span>
+              )}
             </div>
             <div className="flex items-baseline gap-1">
               <span className="text-base font-black text-white font-mono leading-none">
                 Bs. {config.exchangeRate.toFixed(2)}
               </span>
               <span className="text-[10px] text-blue-200 font-mono">/ USD</span>
+              <span className="text-[9px] text-amber-300/80 ml-1 hidden md:inline">bcv.today</span>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               sound.playClick();
               syncBcvRate();
             }}
@@ -1317,6 +1391,16 @@ export default function App() {
           setIsMenuOpen(false);
           setIsCashCutOpen(true);
         }}
+        rateHistory={rateHistory}
+        bcvLoading={bcvLoading}
+        bcvLastSync={bcvLastSync}
+        bcvSource={bcvSource}
+        bcvChangePercent={bcvChangePercent}
+        bcvChangeAmount={bcvChangeAmount}
+        onSyncBcvRate={syncBcvRate}
+        onManualRecordRate={handleManualRecordRate}
+        onReloadHistory={handleReloadOfficialHistory}
+        initialTab={menuInitialTab}
       />
 
       {/* Cash Cut / Shift Closing Modal */}

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { PosConfig, SaleRecord } from '../types/pos';
+import React, { useState, useEffect } from 'react';
+import { PosConfig, SaleRecord, ExchangeRateHistoryEntry } from '../types/pos';
 import { sound } from '../utils/sound';
 import { ReceiptContent } from './ReceiptContent';
+import { BcvLogo } from './BcvLogo';
 import {
   X,
   DollarSign,
@@ -15,6 +16,7 @@ import {
   Store,
   Printer,
   TrendingUp,
+  TrendingDown,
   CheckCircle2,
   Package,
   Calculator,
@@ -23,7 +25,14 @@ import {
   Sliders,
   Eye,
   FileCheck,
-  Check
+  Check,
+  RefreshCw,
+  ExternalLink,
+  ShieldCheck,
+  Calendar,
+  Sparkles,
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
 
 interface MenuDrawerProps {
@@ -36,6 +45,17 @@ interface MenuDrawerProps {
   onResetToImageState: () => void;
   onOpenInventory: () => void;
   onOpenCashCut?: () => void;
+  // BCV Sync & Rate History props
+  rateHistory?: ExchangeRateHistoryEntry[];
+  bcvLoading?: boolean;
+  bcvLastSync?: string;
+  bcvSource?: string;
+  bcvChangePercent?: number;
+  bcvChangeAmount?: number;
+  onSyncBcvRate?: () => Promise<void>;
+  onManualRecordRate?: (rate: number) => void;
+  onReloadHistory?: () => Promise<void>;
+  initialTab?: 'tasa' | 'impresion' | 'history' | 'cierre' | 'settings' | 'shortcuts';
 }
 
 export const MenuDrawer: React.FC<MenuDrawerProps> = ({
@@ -48,11 +68,29 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   onResetToImageState,
   onOpenInventory,
   onOpenCashCut,
+  rateHistory = [],
+  bcvLoading = false,
+  bcvLastSync = '',
+  bcvSource = 'bcv.today',
+  bcvChangePercent = 0,
+  bcvChangeAmount = 0,
+  onSyncBcvRate,
+  onManualRecordRate,
+  onReloadHistory,
+  initialTab = 'tasa',
 }) => {
-  const [activeTab, setActiveTab] = useState<'tasa' | 'impresion' | 'history' | 'cierre' | 'settings' | 'shortcuts'>('tasa');
+  const [activeTab, setActiveTab] = useState<'tasa' | 'impresion' | 'history' | 'cierre' | 'settings' | 'shortcuts'>(initialTab);
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
   
   // Rate & Store Config State
   const [newRateInput, setNewRateInput] = useState(config.exchangeRate.toString());
+  const [historySearch, setHistorySearch] = useState('');
+
   const [tempStoreName, setTempStoreName] = useState(config.storeName);
   const [tempCashier, setTempCashier] = useState(config.cashierName);
   const [tempRif, setTempRif] = useState(config.taxId);
@@ -79,16 +117,84 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
     e.preventDefault();
     const rate = parseFloat(newRateInput);
     if (!isNaN(rate) && rate > 0) {
-      onUpdateConfig({
-        ...config,
-        exchangeRate: rate,
-      });
+      if (onManualRecordRate) {
+        onManualRecordRate(rate);
+      } else {
+        onUpdateConfig({
+          ...config,
+          exchangeRate: rate,
+        });
+      }
       sound.playSuccess();
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2000);
     } else {
       sound.playError();
     }
+  };
+
+  const handleExportHistoryCsv = () => {
+    sound.playClick();
+    if (!rateHistory || rateHistory.length === 0) return;
+    const headers = ['Fecha y Hora', 'Tasa USD (Bs)', 'Tasa Anterior', 'Variación %', 'Diferencia (Bs)', 'EUR (Bs)', 'Fuente Oficial', 'Tipo'];
+    const rows = rateHistory.map((h) => [
+      `"${h.dateFormatted}"`,
+      h.rate.toFixed(4),
+      h.previousRate.toFixed(4),
+      `"${h.changePercent >= 0 ? '+' : ''}${h.changePercent.toFixed(2)}%"`,
+      `"${h.changeAmount >= 0 ? '+' : ''}${h.changeAmount.toFixed(4)}"`,
+      h.eurRate ? h.eurRate.toFixed(4) : 'N/A',
+      `"${h.source}"`,
+      h.isAutomated ? 'Automático' : 'Manual',
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `historial_tasa_bcv_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportHistoryTxt = () => {
+    sound.playClick();
+    if (!rateHistory || rateHistory.length === 0) return;
+    const lines = [
+      '========================================================================',
+      '        BANCO CENTRAL DE VENEZUELA - HISTORIAL DE VARIACIONES DE TASA',
+      '        Sincronización con bcv.today | Fuente API: https://bcv.today/api/rate.json',
+      '========================================================================',
+      `Generado: ${new Date().toLocaleString('es-VE')}`,
+      `Total Registros: ${rateHistory.length}`,
+      `Tasa Vigente: Bs. ${config.exchangeRate.toFixed(4)} / USD`,
+      '------------------------------------------------------------------------',
+      'FECHA / HORA         | TASA USD (Bs) | ANTERIOR (Bs) | CAMBIO %   | DIFERENCIA | ORIGEN',
+      '------------------------------------------------------------------------',
+      ...rateHistory.map((h) => {
+        const dateStr = h.dateFormatted.padEnd(20, ' ');
+        const rateStr = h.rate.toFixed(4).padStart(13, ' ');
+        const prevStr = h.previousRate.toFixed(4).padStart(13, ' ');
+        const sign = h.changePercent >= 0 ? '+' : '';
+        const pctStr = `${sign}${h.changePercent.toFixed(2)}%`.padStart(10, ' ');
+        const diffSign = h.changeAmount >= 0 ? '+' : '';
+        const diffStr = `${diffSign}${h.changeAmount.toFixed(4)}`.padStart(10, ' ');
+        const srcStr = h.source.substring(0, 25);
+        return `${dateStr} | ${rateStr} | ${prevStr} | ${pctStr} | ${diffStr} | ${srcStr}`;
+      }),
+      '========================================================================',
+      'Fin del reporte de auditoría cambiaria.',
+    ];
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `reporte_variaciones_bcv_${new Date().toISOString().split('T')[0]}.txt`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleSaveStoreConfig = (e: React.FormEvent) => {
@@ -233,7 +339,7 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs animate-fade-in">
-      <div className={`w-full ${activeTab === 'impresion' ? 'max-w-2xl' : 'max-w-md'} bg-white h-full shadow-2xl flex flex-col border-l border-slate-300 transition-all duration-300`}>
+      <div className={`w-full ${activeTab === 'impresion' || activeTab === 'tasa' ? 'max-w-2xl' : 'max-w-md'} bg-white h-full shadow-2xl flex flex-col border-l border-slate-300 transition-all duration-300`}>
         {/* Drawer Header */}
         <div className="bg-[#1e4b85] text-white px-5 py-4 flex items-center justify-between shadow-md">
           <div className="flex items-center gap-2.5">
@@ -262,8 +368,9 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
               activeTab === 'tasa' ? 'border-[#1e4b85] text-[#1e4b85] bg-white font-bold' : 'border-transparent text-slate-600 hover:bg-slate-200/60'
             }`}
           >
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>Tasa de Cambio</span>
+            <DollarSign className="w-3.5 h-3.5 text-amber-500" />
+            <span>Tasa BCV (bcv.today)</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Sincronización Activa" />
           </button>
 
           <button
@@ -577,61 +684,334 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
             </div>
           )}
 
-          {/* TAB 2: TASA DE CAMBIO */}
+          {/* TAB 2: TASA BCV & SINCRONIZACIÓN BCV.TODAY */}
           {activeTab === 'tasa' && (
             <div className="space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
-                <span className="text-xs font-bold text-blue-700 uppercase">Tasa Actual de Conversión</span>
-                <div className="text-3xl font-black text-[#1e4b85] font-mono mt-1">
-                  {config.exchangeRate.toFixed(2)} Bs / USD
+              {/* Official BCV Sync Banner */}
+              <div className="bg-gradient-to-r from-[#0d254c] to-[#1e4b85] text-white p-4 rounded-xl shadow-sm border border-blue-900/50 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <BcvLogo className="w-10 h-10 shrink-0 drop-shadow-md" />
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-sm tracking-wide text-white">
+                          Sincronización con bcv.today
+                        </h3>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Activo
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-xs text-blue-200 flex-wrap">
+                        <span className="font-semibold text-amber-300">Fuente Oficial API:</span>
+                        <a
+                          href="https://bcv.today/api/rate.json"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline hover:text-white font-mono flex items-center gap-0.5"
+                        >
+                          https://bcv.today/api/rate.json
+                          <ExternalLink className="w-3 h-3 inline" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      sound.playClick();
+                      if (onSyncBcvRate) await onSyncBcvRate();
+                    }}
+                    disabled={bcvLoading}
+                    className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 active:bg-amber-500 text-slate-950 font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50 shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${bcvLoading ? 'animate-spin' : ''}`} />
+                    <span>{bcvLoading ? 'Consultando...' : 'Sincronizar con bcv.today'}</span>
+                  </button>
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Todos los precios y subtotales se actualizan en tiempo real
-                </p>
+
+                <div className="bg-black/25 rounded-lg p-2.5 text-[11px] text-blue-100/90 leading-relaxed border border-white/10">
+                  <p className="flex items-start gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Consulta automáticamente la tasa publicada por el Banco Central de Venezuela.</strong> El sistema guarda cada variación en el historial con fecha y porcentaje de cambio.
+                    </span>
+                  </p>
+                  <div className="mt-1.5 pt-1.5 border-t border-white/10 flex flex-wrap items-center justify-between text-[10px] text-blue-200">
+                    <span>Última sincronización: <strong>{bcvLastSync || 'En línea'}</strong></span>
+                    <span>Proveedor: <strong>{bcvSource || 'bcv.today (Fuente Oficial API)'}</strong></span>
+                  </div>
+                </div>
               </div>
 
-              <form onSubmit={handleSaveRate} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Modificar Tasa de Cambio (Bs. por 1 USD):
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={newRateInput}
-                      onChange={(e) => setNewRateInput(e.target.value)}
-                      className="w-full px-3.5 py-2 text-lg font-bold font-mono border-2 border-slate-300 rounded-lg focus:border-[#1e4b85] focus:outline-hidden"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                      Bs/USD
+              {/* Main Rate Indicators Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* USD Rate Card */}
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3.5 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase text-blue-800 tracking-wider">
+                      Tasa Oficial USD (BCV)
                     </span>
+                    {bcvChangePercent !== 0 && (
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5 ${
+                          bcvChangePercent > 0
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : 'bg-rose-100 text-rose-800 border border-rose-300'
+                        }`}
+                      >
+                        {bcvChangePercent > 0 ? (
+                          <TrendingUp className="w-3 h-3 text-emerald-600" />
+                        ) : (
+                          <TrendingDown className="w-3 h-3 text-rose-600" />
+                        )}
+                        {bcvChangePercent > 0 ? `+${bcvChangePercent.toFixed(2)}%` : `${bcvChangePercent.toFixed(2)}%`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-3xl font-black text-[#1e4b85] font-mono mt-1">
+                    Bs. {config.exchangeRate.toFixed(4)}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center justify-between">
+                    <span>Bolívares por 1 Dólar</span>
+                    {bcvChangeAmount !== 0 && (
+                      <span className="font-mono text-slate-600 font-semibold">
+                        Dif: {bcvChangeAmount > 0 ? `+${bcvChangeAmount.toFixed(4)}` : bcvChangeAmount.toFixed(4)} Bs.
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  {[40.00, 42.00, 45.00, 50.00].map((rate) => (
-                    <button
-                      key={rate}
-                      type="button"
-                      onClick={() => {
-                        sound.playClick();
-                        setNewRateInput(rate.toFixed(2));
-                      }}
-                      className="flex-1 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 font-bold text-xs rounded-md pos-btn cursor-pointer"
-                    >
-                      {rate.toFixed(2)}
-                    </button>
-                  ))}
+                {/* Status & Frecuencia */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase text-slate-600 tracking-wider">
+                        Sincronización Automática
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                        Cada 5 min
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-slate-800 mt-2 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <span>Verificación Oficial Activa</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Todos los subtotales del POS y precios de venta en Bs. se recalculan al instante con esta tasa.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Manual Override Form */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Calculator className="w-3.5 h-3.5 text-[#1e4b85]" />
+                    Ajuste Manual / Excepcional de Tasa
+                  </span>
+                  <span className="text-[10px] text-slate-500">Se guardará en el historial con su % de cambio</span>
                 </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-2.5 px-4 bg-[#1e4b85] hover:bg-[#163f73] text-white font-bold text-sm rounded-lg pos-btn cursor-pointer"
-                >
-                  Guardar y Aplicar Tasa
-                </button>
-              </form>
+                <form onSubmit={handleSaveRate} className="space-y-2.5">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={newRateInput}
+                        onChange={(e) => setNewRateInput(e.target.value)}
+                        placeholder="Ej. 873.87"
+                        className="w-full px-3 py-1.5 text-base font-bold font-mono border-2 border-slate-300 rounded-lg focus:border-[#1e4b85] focus:outline-hidden bg-white"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                        Bs/USD
+                      </span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="py-1.5 px-4 bg-[#1e4b85] hover:bg-[#163f73] text-white font-bold text-xs rounded-lg pos-btn cursor-pointer whitespace-nowrap shadow-xs"
+                    >
+                      Guardar y Registrar
+                    </button>
+                  </div>
+
+                  {/* Preset quick buttons */}
+                  <div className="flex gap-1.5 overflow-x-auto">
+                    <span className="text-[10px] font-bold text-slate-400 self-center mr-1">Rápidos:</span>
+                    {[
+                      config.exchangeRate,
+                      Number((config.exchangeRate * 1.005).toFixed(2)),
+                      Number((config.exchangeRate * 1.01).toFixed(2)),
+                      Number((config.exchangeRate * 1.02).toFixed(2)),
+                    ].map((rateVal, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          sound.playClick();
+                          setNewRateInput(rateVal.toFixed(4));
+                        }}
+                        className="py-1 px-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-mono text-[11px] font-bold rounded pos-btn cursor-pointer"
+                      >
+                        {rateVal.toFixed(2)}
+                      </button>
+                    ))}
+                  </div>
+                </form>
+              </div>
+
+              {/* HISTORIAL DE VARIACIONES CON FECHA Y PORCENTAJE DE CAMBIO */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs bg-white space-y-0">
+                <div className="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <History className="w-4 h-4 text-[#1e4b85]" />
+                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                        Historial de Variaciones de la Tasa BCV
+                      </h4>
+                      <span className="px-1.5 py-0.2 bg-blue-100 text-[#1e4b85] font-bold text-[10px] rounded-full">
+                        {rateHistory.length}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Registro de cada variación con fecha y porcentaje de cambio
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {onReloadHistory && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          sound.playClick();
+                          await onReloadHistory();
+                        }}
+                        title="Recargar histórico oficial desde bcv.today"
+                        className="p-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-md text-[11px] font-bold flex items-center gap-1 cursor-pointer pos-btn shadow-2xs"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span className="hidden sm:inline">Histórico BCV</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleExportHistoryCsv}
+                      disabled={rateHistory.length === 0}
+                      title="Descargar en formato CSV"
+                      className="p-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-md text-[11px] font-bold flex items-center gap-1 cursor-pointer pos-btn shadow-2xs disabled:opacity-40"
+                    >
+                      <Download className="w-3 h-3 text-emerald-600" />
+                      <span>CSV</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportHistoryTxt}
+                      disabled={rateHistory.length === 0}
+                      title="Descargar reporte de texto"
+                      className="p-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-md text-[11px] font-bold flex items-center gap-1 cursor-pointer pos-btn shadow-2xs disabled:opacity-40"
+                    >
+                      <FileText className="w-3 h-3 text-blue-600" />
+                      <span>TXT</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* History Table */}
+                <div className="max-h-[340px] overflow-y-auto">
+                  {rateHistory.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 space-y-2">
+                      <History className="w-8 h-8 mx-auto text-slate-300" />
+                      <p className="text-xs font-semibold">No hay registros de variación almacenados todavía.</p>
+                      {onReloadHistory && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            sound.playClick();
+                            await onReloadHistory();
+                          }}
+                          className="px-3 py-1.5 bg-[#1e4b85] text-white font-bold text-xs rounded-lg cursor-pointer"
+                        >
+                          Cargar Histórico Oficial desde bcv.today
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-600 sticky top-0 border-b border-slate-200">
+                        <tr>
+                          <th className="py-2 px-3">Fecha y Hora</th>
+                          <th className="py-2 px-2 text-right">Tasa (USD)</th>
+                          <th className="py-2 px-2 text-right">Anterior</th>
+                          <th className="py-2 px-2 text-center">% Cambio</th>
+                          <th className="py-2 px-2 text-right">Diferencia</th>
+                          <th className="py-2 px-3">Fuente</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {rateHistory.map((item, idx) => {
+                          const isPositive = item.changePercent > 0;
+                          const isNegative = item.changePercent < 0;
+                          return (
+                            <tr
+                              key={item.id || idx}
+                              className={`hover:bg-blue-50/50 transition-colors ${
+                                idx === 0 ? 'bg-amber-50/40 font-semibold' : ''
+                              }`}
+                            >
+                              <td className="py-2 px-3 text-slate-800 whitespace-nowrap">
+                                <div className="font-medium text-slate-900">{item.dateFormatted}</div>
+                                {item.effectiveDate && (
+                                  <div className="text-[10px] text-slate-400 font-mono">
+                                    Valor: {item.effectiveDate}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono font-bold text-[#1e4b85] whitespace-nowrap">
+                                Bs. {item.rate.toFixed(4)}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-slate-500 text-[11px] whitespace-nowrap">
+                                Bs. {item.previousRate.toFixed(4)}
+                              </td>
+                              <td className="py-2 px-2 text-center whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
+                                    isPositive
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                      : isNegative
+                                      ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                      : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                  }`}
+                                >
+                                  {isPositive ? (
+                                    <ArrowUpRight className="w-2.5 h-2.5 text-emerald-600" />
+                                  ) : isNegative ? (
+                                    <ArrowDownRight className="w-2.5 h-2.5 text-rose-600" />
+                                  ) : null}
+                                  {isPositive ? `+${item.changePercent.toFixed(2)}%` : `${item.changePercent.toFixed(2)}%`}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-[11px] text-slate-700 whitespace-nowrap">
+                                {item.changeAmount > 0 ? `+${item.changeAmount.toFixed(4)}` : item.changeAmount.toFixed(4)} Bs.
+                              </td>
+                              <td className="py-2 px-3 text-[10px] text-slate-500 whitespace-nowrap">
+                                <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 border border-slate-200">
+                                  {item.source.includes('bcv.today') ? 'bcv.today' : item.source}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
